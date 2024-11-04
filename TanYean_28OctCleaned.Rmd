@@ -1,0 +1,443 @@
+---
+title: "Climate Security Replication Files"
+author: "Jing Ling Tan"
+date: "2024-10-28"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+# Load libraries and import climate speech dataset
+library(readr)
+library(ggplot2)
+library(dplyr)
+
+# Load the climate speech data
+# This is the full dataset of climate speeches from the UN by Arias (2024), which we recoded using LLM for whether the speeches are climate only, climate-security, or non-climate. 
+data <- read_csv("sample_full_climate_modified.csv")
+```
+
+# Cleaning
+
+```{r}
+# Create a 'security_bi' column where speeches related to security (coded as 'Securitized-Climate') are marked as 1, and others as 0
+data <- data %>%
+  mutate(security_bi = ifelse(climate_flag == "Securitized-Climate", 1, 0))
+
+# Filter the data to include only speeches flagged as either 'Only-Climate' or 'Securitized-Climate'
+filtered_data <- data %>%
+  filter(climate_flag %in% c("Only-Climate", "Securitized-Climate"))
+
+# Calculate the proportion of security-related speeches (security_bi) for each country
+security_prop <- filtered_data %>%
+  group_by(country) %>%
+  summarise(security_prop = mean(security_bi, na.rm = TRUE))
+
+# Merge the security_prop back to the main dataset based on country
+data <- left_join(data, security_prop, by = "country")
+
+# Ensure 'security_prop' is numeric, handling any potential missing values
+data <- data %>%
+  mutate(security_prop = as.numeric(security_prop))
+
+# Filter out years before 1984 to focus on the relevant timeframe
+filtered_year <- data %>%
+  filter(year >= 1984)
+
+# Group data by year and calculate total 'security_bi' and mean 'security_prop' for each year
+grouped_data <- filtered_year %>%
+  group_by(year) %>%
+  summarise(security_bi = sum(security_bi, na.rm = TRUE),    # Sum security speeches (count)
+            security_prop = mean(security_prop, na.rm = TRUE))  # Mean proportion of security speeches
+
+```
+
+# Disaster data: Merging and Wrangling
+
+```{r, warning=F}
+library(readxl)
+# Load the disaster dataset
+# Data from the Emergency Data Database (https://doc.emdat.be/docs/introduction/)
+# Accessed - October 2024
+disaster_data <- read_excel("emdat.xlsx")
+
+# Calculate disaster duration and adjust numeric columns for disaster-related variables
+# We divide variables such as total deaths, total affected, and total damage by the disaster duration
+disaster_data <- disaster_data %>%
+  mutate(Disaster_Duration = `End Year` - `Start Year` + 1) %>%
+  mutate(across(c(`Total Deaths`, `Total Affected`, `Total Damage Adjusted`), 
+                ~ .x / Disaster_Duration))  # Divide by disaster duration to spread the impact
+
+# Count the number of disasters for each country-year combination
+# Here, we create a simple count of the number of disasters occurring in each country-year
+disaster_count <- disaster_data %>%
+  group_by(ISO, `Start Year`) %>%
+  summarise(disaster_count = n()) %>%
+  ungroup()
+
+# Aggregate disaster types for each country-year, concatenating when there are multiple types
+aggregated_details <- disaster_data %>%
+  group_by(ISO, `Start Year`) %>%
+  summarise(Disaster_Type = paste(unique(`Disaster Type`), collapse = ";"),
+            Disaster_Subtype = paste(unique(`Disaster Subtype`), collapse = ";")) %>%
+  ungroup()
+
+# Aggregate the numeric variables, summing deaths, affected people, and damage over the country-year
+aggregated_disasters <- disaster_data %>%
+  group_by(ISO, `Start Year`) %>%
+  summarise(Total_Deaths = sum(`Total Deaths`, na.rm = TRUE),
+            Total_Affected = sum(`Total Affected`, na.rm = TRUE),
+            Total_Damage_Adjusted = sum(`Total Damage Adjusted`, na.rm = TRUE)) %>%
+  ungroup()
+
+# Create indicators for "Natural" and "Technological" disaster groups
+# These are binary columns indicating whether the disaster is natural or technological
+disaster_group_indicators <- disaster_data %>%
+  mutate(natural_disaster = ifelse(`Disaster Group` == "Natural", 1, 0),
+         technological_disaster = ifelse(`Disaster Group` == "Technological", 1, 0)) %>%
+  group_by(ISO, `Start Year`) %>%
+  summarise(natural_disaster_count = sum(natural_disaster, na.rm = TRUE),
+            technological_disaster_count = sum(technological_disaster, na.rm = TRUE)) %>%
+  ungroup()
+
+# Merge all aggregated disaster data (disaster counts, numeric impacts, and disaster group indicators) into one dataset
+disaster_summary <- aggregated_disasters %>%
+  left_join(disaster_count, by = c("ISO", "Start Year")) %>%
+  left_join(aggregated_details, by = c("ISO", "Start Year")) %>%
+  left_join(disaster_group_indicators, by = c("ISO", "Start Year"))
+
+# Merge the disaster data with the climate speech data by matching on country and year
+# This combines the disaster data with climate speeches for each country-year combination
+final_data <- data %>%
+  left_join(disaster_summary, by = c("country" = "ISO", "year" = "Start Year"))
+```
+
+# Fig 1. Descriptive Plot
+
+```{r}
+# Summarize security_bi (speech count) and disaster count by year
+security_bi_sum_per_year <- final_data %>%
+  group_by(year) %>%
+  summarise(security_bi_sum = sum(security_bi, na.rm = TRUE))
+
+disaster_count_sum_per_year <- final_data %>%
+  group_by(year) %>%
+  summarise(disaster_count_sum = sum(disaster_count, na.rm = TRUE))
+
+# Figure 1 (similar plot made on Python for better visuals)
+# Plot security-related speeches over the years, showing the primary y-axis for security_bi_sum
+plot(security_bi_sum_per_year$year, security_bi_sum_per_year$security_bi_sum, 
+     type = "o", col = rgb(0.2, 0.4, 0.8, 0.7), pch = 16, cex = 1, lwd = 2, 
+     ylim = c(0, 100), xlab = "Year", ylab = "Climate Security Speeches", 
+     main = "No. of Disasters and Climate Security Speeches by Year",
+     col.main = "black", col.lab = "black", font.lab = 1, cex.lab = 1.2,
+     xaxt = "n", xlim = c(1985, 2015))
+
+# Customize the x-axis to show ticks every 5 years, from 1985 to 2015
+years <- seq(1985, 2015, by = 5)
+axis(1, at = years, labels = years, col.axis = "black", las = 1)
+
+# Add gridlines to improve readability
+abline(h = seq(0, 100, by = 20), col = "gray90", lty = "dotted")
+abline(v = years, col = "gray90", lty = "dotted")
+
+# Add the second y-axis for the disaster counts and plot the data
+par(new = TRUE)
+plot(disaster_count_sum_per_year$year, disaster_count_sum_per_year$disaster_count_sum, 
+     type = "o", col = rgb(0.8, 0.2, 0.2, 0.7), pch = 17, cex = 1, lwd = 2, 
+     ylim = c(0, 2000), axes = FALSE, xlab = "", ylab = "", xlim = c(1985, 2015))
+
+# Add the right y-axis for disasters with appropriate labeling
+axis(side = 4, col = "red", col.axis = "red", lwd = 2, cex.axis = 1.2)
+mtext("Number of Disasters", side = 4, line = 3, col = "red", font = 1, cex = 1.2)
+
+# Add a legend to distinguish between the two plotted lines (climate security speeches and disasters)
+legend("topleft", legend = c("Climate Security Speeches", "Disasters"), 
+       col = c(rgb(0.2, 0.4, 0.8, 0.7), rgb(0.8, 0.2, 0.2, 0.7)), 
+       pch = c(16, 17), lwd = 2, bty = "n", cex = 1.2)
+```
+
+# Fig 2 - Reg Plot
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(broom)
+
+# Merge the metadata (for SIDS) with the final_data based on ISO-alpha3 code
+final_data <- final_data %>%
+  left_join(metadata_relevant_columns, by = c("country" = "ISO.alpha3.Code"))
+
+# If you face an error on this line of code, just run the whole chunk again.
+# Create a new column to classify countries into SIDS, P5, or Middle Countries
+#final_data <- final_data %>%
+  mutate(group = case_when(
+    country %in% p5_countries ~ 'P5',  # UN Permanent 5 Countries
+    `Small.Island.Developing.States..SIDS.` == 1 ~ 'SIDS',  # Small Island Developing States
+    TRUE ~ 'Middle Countries'  # All other countries
+  ))
+
+# Sort and create 1-year lag for disaster-related variables
+final_data <- final_data %>%
+  arrange(country, year)
+
+# Create lagged variables for disaster_count from 0 to 5 years using a loop
+for (i in 1:5) {
+  lag_var_name <- paste0("lagged_disaster_count_", i)  # Create dynamic variable name for lags
+  final_data <- final_data %>%
+    group_by(country) %>%
+    mutate(!!lag_var_name := dplyr::lag(disaster_count, i)) %>%
+    ungroup()
+}
+
+
+# Define the function to run regressions and plot results
+run_regression_and_plot <- function(subset_data, title_suffix) {
+  
+  # Aggregate data at the country-year level
+  aggregated_data <- subset_data %>%
+    group_by(country, year) %>%
+    summarise(
+      sum_security = sum(security_bi, na.rm = TRUE),  
+      disaster_count = first(disaster_count),  # Original disaster count
+      lagged_disaster_count_1 = first(lagged_disaster_count_1),  
+      lagged_disaster_count_2 = first(lagged_disaster_count_2),  
+      lagged_disaster_count_3 = first(lagged_disaster_count_3),  
+      lagged_disaster_count_4 = first(lagged_disaster_count_4),  
+      lagged_disaster_count_5 = first(lagged_disaster_count_5),
+      decade = first(decade),  
+      country = first(country)
+    )
+  
+  # Run linear regressions for disaster_count lags 0 to 5 and store results
+  lag_results <- list()
+  
+  for (i in 0:5) {
+    lag_var <- ifelse(i == 0, "disaster_count", paste0("lagged_disaster_count_", i))  # Use correct lag variable
+    formula <- as.formula(paste("sum_security ~", lag_var, "+ country"))  # Regression formula with country fixed effects
+    model <- lm(formula, data = aggregated_data)  # Run the model
+    coef_tidy <- tidy(model, conf.int = TRUE, conf.level = 0.95)  # Extract coefficients and confidence intervals
+    coef_tidy$lag <- i  # Add lag year for reference
+    lag_results[[i + 1]] <- coef_tidy  # Store results
+  }
+  
+  # Combine results into one dataframe
+  all_coefs <- do.call(rbind, lag_results)
+  
+  # Filter only disaster-related terms
+  all_coefs_filtered <- all_coefs %>%
+    filter(term == "disaster_count" | grepl("lagged_disaster_count_", term))
+  # Plot the coefficients with 90% confidence intervals
+    ggplot(all_coefs_filtered, aes(x = lag, y = estimate)) +
+  geom_point(data = all_coefs_filtered %>% filter(lag != 4), color = "black", size = 3) +
+  geom_errorbar(data = all_coefs_filtered %>% filter(lag != 4), aes(ymin = conf.low, ymax = conf.high), width = 0.2, color = "black") +
+  # Plot the 4th lag in darkred without adding to the legend
+  geom_point(data = all_coefs_filtered %>% filter(lag == 4), color = "darkred", size = 3, show.legend = FALSE) +
+  geom_errorbar(data = all_coefs_filtered %>% filter(lag == 4), aes(ymin = conf.low, ymax = conf.high), width = 0.2, color = "darkred", show.legend = FALSE) +
+    labs(title = paste("Disaster Count Increases Climate Security Speeches (After Some Time)"),
+         x = "Number of Years Disaster Count is Lagged (t-i from DV)",
+         y = "Coef of Disaster Count on No. of Climate Security Speeches") +
+    theme_minimal()
+}
+
+##Recommended format that separte regression from the graph
+aggregated_data <- final_data %>%
+  group_by(country, year) %>%
+  summarise(
+    sum_security = sum(security_bi, na.rm = TRUE),
+    disaster_count = first(disaster_count),
+    lagged_disaster_count_1 = first(lagged_disaster_count_1),
+    lagged_disaster_count_2 = first(lagged_disaster_count_2),
+    lagged_disaster_count_3 = first(lagged_disaster_count_3),
+    lagged_disaster_count_4 = first(lagged_disaster_count_4),
+    lagged_disaster_count_5 = first(lagged_disaster_count_5),
+    decade = first(decade),
+    country = first(country)
+  )
+
+lag_results <- list()
+
+for (i in 0:5) {
+  lag_var <- ifelse(i == 0, "disaster_count", paste0("lagged_disaster_count_", i))
+  formula <- as.formula(paste("sum_security ~", lag_var, "+ country"))
+  model <- lm(formula, data = aggregated_data)
+  coef_tidy <- tidy(model, conf.int = TRUE, conf.level = 0.95)
+  coef_tidy$lag <- i
+  lag_results[[i + 1]] <- coef_tidy
+}
+
+all_coefs <- do.call(rbind, lag_results)
+
+all_coefs_filtered <- all_coefs %>%
+  filter(term == "disaster_count" | grepl("lagged_disaster_count_", term))
+
+plot <- ggplot(all_coefs_filtered, aes(x = lag, y = estimate)) +
+  geom_point(data = all_coefs_filtered %>% filter(lag != 4), color = "black", size = 3) +
+  geom_errorbar(data = all_coefs_filtered %>% filter(lag != 4), aes(ymin = conf.low, ymax = conf.high), width = 0.2, color = "black") +
+  geom_point(data = all_coefs_filtered %>% filter(lag == 4), color = "darkred", size = 3, show.legend = FALSE) +
+  geom_errorbar(data = all_coefs_filtered %>% filter(lag == 4), aes(ymin = conf.low, ymax = conf.high), width = 0.2, color = "darkred", show.legend = FALSE) +
+  labs(
+    title = "Disaster Count Increases Climate Security Speeches (After Some Time)",
+    x = "Number of Years Disaster Count is Lagged (t-i from DV)",
+    y = "Coef of Disaster Count on No. of Climate Security Speeches"
+  ) +
+  theme_minimal()
+
+ggsave(filename = "disaster_count_regression_plot.pdf", plot = plot, device = "pdf", width = 8, height = 6)
+
+ 
+
+# Create subsets and generate plots
+
+# Filter data for climate_flag != "Non-Climate"
+subset1 <- final_data %>%
+  filter(climate_flag != "Non-Climate")
+
+# Filter data for SIDS countries
+subset2 <- final_data %>%
+  filter(climate_flag != "Non-Climate" & group == "SIDS")
+
+# Filter data for Middle Countries
+subset3 <- final_data %>%
+  filter(climate_flag != "Non-Climate" & group == "Middle Countries")
+
+# Filter data for P5 countries
+subset4 <- final_data %>%
+  filter(climate_flag != "Non-Climate" & group == "P5")
+
+# Run the function for each subset
+plot1 <- run_regression_and_plot(subset1, "All Countries")
+# plot2 <- run_regression_and_plot(subset2, "SIDS Countries")
+# plot3 <- run_regression_and_plot(subset3, "Middle Countries")
+# plot4 <- run_regression_and_plot(subset4, "P5 Countries")
+
+# Display the plots
+print(plot1)
+# print(plot2)
+# print(plot3)
+# print(plot4)
+```
+
+# Adding control data
+
+```{r}
+# Controls from Arias 2024 dataset (original replication paper)
+grouped_climate_tiles <- read.csv("grouped_climate_tiles.csv")
+
+grouped_climate_tiles_selected <- grouped_climate_tiles %>%
+  select(doc_id, p5_ind, sids_ind, concern, regime_type, adjust_total_disaster_affected,
+         amt_warming, pctagreeus, military_exp_prop_gdp, GDPPC_2010_usd, log_pop)  
+
+# Left join using 'doc_id' 
+final_data <- final_data %>%
+  left_join(grouped_climate_tiles_selected, by = "doc_id")
+```
+
+# Table 2 - Running Models with Controls -
+
+```{r}
+library(ggplot2)
+library(broom)
+library(stargazer)
+
+# Aggregate data at the country-year level, including lagged variables
+aggregated_data <- final_data %>%
+  filter(climate_flag != "Non-Climate") %>%  # Filter for climate_flag != "Non-Climate"
+  group_by(country, year) %>%
+  summarise(
+    sum_security = sum(security_bi, na.rm = TRUE),  
+    disaster_count = first(disaster_count),
+    lagged_disaster_count_1 = first(lagged_disaster_count_1),  # 1-year lag
+    lagged_disaster_count_2 = first(lagged_disaster_count_2),  # 2-year lag
+    lagged_disaster_count_3 = first(lagged_disaster_count_3),  # 3-year lag
+    lagged_disaster_count_4 = first(lagged_disaster_count_4),  # 4-year lag
+    concern = first(concern),  
+    regime_type = first(regime_type),  
+    adjust_total_disaster_affected = first(adjust_total_disaster_affected),  
+    amt_warming = first(amt_warming), 
+    pctagreeus = first(pctagreeus),  # Agreement with US
+    military_exp_prop_gdp = first(military_exp_prop_gdp),  
+    GDPPC_2010_usd = first(GDPPC_2010_usd),  # GDP per capita
+    log_pop = first(log_pop),  # Log population
+    decade = first(decade),  # Decade variable
+    country = first(country)  # Keep country for fixed effects
+  )
+
+# Run the regressions and incrementally add controls
+
+# Model 1: Simple regression with lagged disaster count (lag 4) and country FEs
+model_1 <- lm(sum_security ~ lagged_disaster_count_4 + country, data = aggregated_data)
+
+# Model 2: Add decade fixed effects
+model_2 <- lm(sum_security ~ lagged_disaster_count_4 + factor(decade) + country , data = aggregated_data)
+
+# Model 3: Add GDP and population
+model_3 <- lm(sum_security ~ lagged_disaster_count_4 +  GDPPC_2010_usd + log_pop + factor(decade) +country, data = aggregated_data)
+
+# Model 4: Add regime type + military expenditure
+model_4 <- lm(sum_security ~ lagged_disaster_count_4 +  GDPPC_2010_usd + log_pop + regime_type + military_exp_prop_gdp +  factor(decade) +country, data = aggregated_data)
+
+# Note this will save a .tex file in your directory
+# This output is identical in results to Table 2 of our results, except we removed all the rows with coefficients for country and decade FEs on Overleaf for brevity. 
+
+# # Custom covariate labels
+ covariate_labels <- c("\\textbf{\\textcolor{red}{4-Year Lagged Disaster Count}}", 
+                       "GDP per Capita", "Log Population", "Regime Type", "Military Expenditure")
+ 
+# # Generate the LaTeX output using stargazer
+ stargazer(model_1, model_2, model_3, model_4,
+           type = "latex",  # Specify LaTeX output
+           title = "Linear Regression of Climate Securitization on Lagged Disaster Count",
+           column.labels = c("Country FE", "+ Decade FE", "+ GDP/Pop", "+ Regime/Mil Exp"),
+           dep.var.labels = "DV: Count of Climate Security Speeches at Country-Year Level",
+           covariate.labels = covariate_labels,  # Use custom labels with bold and red for the lagged disaster count
+           omit.stat = c("f", "ser"),  # Remove F-stat and standard error
+           add.lines = list(
+             c("Country Fixed Effects", "Yes", "Yes", "Yes", "Yes"),  # Show "Yes" for Country FEs
+             c("Decade Fixed Effects", "No", "Yes", "Yes", "Yes")  # Show "Yes" where Decade FEs are added
+           ),
+           digits.extra = 0,  # Adjust precision to avoid extra decimal places
+           out.header = FALSE,  # Prevent unnecessary header information in LaTeX
+           out = "regression_results_final.tex")  # Save LaTeX file
+```
+
+# Table A1.
+
+```{r}
+# Model 1: Simple regression with disaster count (no lag) and country FEs
+model_1_no_lag <- lm(sum_security ~ disaster_count + country, data = aggregated_data)
+
+# Model 2: Add decade fixed effects
+model_2_no_lag <- lm(sum_security ~ disaster_count + factor(decade) + country, data = aggregated_data)
+
+# Model 3: Add GDP and population
+model_3_no_lag <- lm(sum_security ~ disaster_count + GDPPC_2010_usd + log_pop + factor(decade) + country, data = aggregated_data)
+
+# Model 4: Add regime type + military expenditure
+model_4_no_lag <- lm(sum_security ~ disaster_count + GDPPC_2010_usd + log_pop + regime_type + military_exp_prop_gdp + factor(decade) + country, data = aggregated_data)
+
+# Note this will save a .tex file in your directory
+# This output is identical in results to Appendix Table 1 of our results, except we removed all the rows with coefficients for country and decade FEs on Overleaf for brevity. 
+
+# # Custom covariate labels for the no-lag models
+# covariate_labels_no_lag <- c("\\textbf{\\textcolor{red}{Disaster Count}}", 
+#                              "GDP per Capita", "Log Population", "Regime Type", "Military Expenditure")
+# 
+# # Generate the LaTeX output using stargazer for no-lag models
+# stargazer(model_1_no_lag, model_2_no_lag, model_3_no_lag, model_4_no_lag,
+#           type = "latex",  # Specify LaTeX output
+#           title = "Linear Regression of Climate Securitization on Disaster Count (No Lag)",
+#           column.labels = c("Country FE", "+ Decade FE", "+ GDP/Pop", "+ Regime/Mil Exp"),
+#           dep.var.labels = "DV: Count of Climate Security Speeches at Country-Year Level",
+#           covariate.labels = covariate_labels_no_lag,  # Use custom labels with bold and red for the disaster count
+#           omit.stat = c("f", "ser"),  # Remove F-stat and standard error
+#           add.lines = list(
+#             c("Country Fixed Effects", "Yes", "Yes", "Yes", "Yes"),  # Show "Yes" for Country FEs
+#             c("Decade Fixed Effects", "No", "Yes", "Yes", "Yes")  # Show "Yes" where Decade FEs are added
+#           ),
+#           digits.extra = 0,  # Adjust precision to avoid extra decimal places
+#           out.header = FALSE,  # Prevent unnecessary header information in LaTeX
+#           out = "regression_results_no_lag_final.tex")  # Save LaTeX file
+```
