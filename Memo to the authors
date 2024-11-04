@@ -1,0 +1,13 @@
+Memo for Climate Disasters Drive Security Concerns: A Text Analysis of UN Climate Speeches
+This paper examines the relationship between the experience of climate disasters and the tendency of countries to frame climate issues as security concerns in UN General Assembly speeches. This approach is both unique and valuable, offering significant real-world and theoretical insights. However, the paper could take a further step by exploring the political and policy implications of framing climate issues as security concerns. Without this, the analysis feels somewhat descriptive and lacks a strong theoretical foundation explaining why this shift in framing should be of particular importance to climate scholars.
+
+To strengthen the analysis, I recommend that the author investigate whether countries framing climate as a security issue show corresponding changes in adaptation or mitigation policies, such as alterations in their NDC (Nationally Determined Contributions) commitments. This additional analysis could demonstrate whether security framing translates into concrete policy shifts.
+
+Additionally, while the four-year lagged model yields the strongest results, I find this both intriguing and somewhat unconvincing. It seems plausible that different types of disasters—such as hurricanes or wildfires versus slower-onset issues like desertification or sea-level rise—could vary in their immediate and long-term impacts on security discourse. To address this, I suggest the author explore whether the framing effect varies by disaster type, as this could reveal important heterogeneous effects across different disaster categories.
+
+In terms of the replication materials, since the metadata is missing from the files that the authors provided, I am not able to replicate part of the analysis. However, I think the metadata 
+has manny interesting information such as Small Island Developing States and UN Permanent 5 Countries which might be offering a country heterogeneous effect that might worth looking at.
+In general the code is very thorough and well formatted, just some minor things that might be helpful for replicators:
+1. In line 197-243, there is a big chuck of code that runs the regression and make the plots at the same time. I would recommend the author to split the code into two parts and using separate
+code to generate the graph. I provided the recommended code in the file.
+2. The author should also save the graph using ggsave() to the replication materials to make it easier for people to check the results.
