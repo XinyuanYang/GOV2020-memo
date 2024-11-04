@@ -5,6 +5,8 @@ To strengthen the analysis, I recommend that the author investigate whether coun
 
 Additionally, while the four-year lagged model yields the strongest results, I find this both intriguing and somewhat unconvincing. It seems plausible that different types of disasters—such as hurricanes or wildfires versus slower-onset issues like desertification or sea-level rise—could vary in their immediate and long-term impacts on security discourse. To address this, I suggest the author explore whether the framing effect varies by disaster type, as this could reveal important heterogeneous effects across different disaster categories.
 
+A note on the use of Large Language Models (LLMs) in this paper: while employing LLMs for text analysis is indeed innovative, the reliability of the results remains challenging to validate. I recommend that the authors consider using additional text analysis methods, such as dictionary-based or supervised machine learning approaches, to cross-validate and strengthen the robustness of their findings.
+
 In terms of the replication materials, since the metadata is missing from the files that the authors provided, I am not able to replicate part of the analysis. However, I think the metadata 
 has manny interesting information such as Small Island Developing States and UN Permanent 5 Countries which might be offering a country heterogeneous effect that might worth looking at.
 In general the code is very thorough and well formatted, just some minor things that might be helpful for replicators:
